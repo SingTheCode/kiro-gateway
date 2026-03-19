@@ -342,12 +342,21 @@ class KiroAuthManager:
             if 'profileArn' in data:
                 self._profile_arn = data['profileArn']
             if 'region' in data:
-                self._region = data['region']
-                # Update URLs for new region
-                self._refresh_url = get_kiro_refresh_url(self._region)
-                self._api_host = get_kiro_api_host(self._region)
-                self._q_host = get_kiro_q_host(self._region)
-                logger.info(f"Region updated from credentials file: region={self._region}, api_host={self._api_host}, q_host={self._q_host}")
+                # Check if this is AWS SSO OIDC (has clientId/clientSecret or clientIdHash)
+                is_sso = 'clientId' in data or 'clientIdHash' in data
+                if is_sso:
+                    # SSO region is only for OIDC token refresh, not for API endpoints
+                    # Q API (q.{region}.amazonaws.com) only exists in certain regions (e.g., us-east-1)
+                    self._sso_region = data['region']
+                    self._refresh_url = get_kiro_refresh_url(data['region'])
+                    logger.info(f"SSO region from credentials file: {self._sso_region} (API stays at {self._region})")
+                else:
+                    # Kiro Desktop Auth - region applies to everything
+                    self._region = data['region']
+                    self._refresh_url = get_kiro_refresh_url(self._region)
+                    self._api_host = get_kiro_api_host(self._region)
+                    self._q_host = get_kiro_q_host(self._region)
+                    logger.info(f"Region updated from credentials file: region={self._region}, api_host={self._api_host}, q_host={self._q_host}")
             
             # Load clientIdHash and device registration for Enterprise Kiro IDE
             if 'clientIdHash' in data:
