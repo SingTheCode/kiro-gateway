@@ -1,0 +1,22 @@
+[project]
+name = "kiro-gateway"
+version = "0.1.0"
+description = "Proxy gateway for Kiro API (Amazon Q Developer / AWS CodeWhisperer)"
+readme = "README.md"
+license = "AGPL-3.0"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "loguru",
+    "python-dotenv",
+    "tiktoken",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "hypothesis",
+]
