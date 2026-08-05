@@ -483,6 +483,7 @@ def anthropic_to_kiro(
         conversation_id=conversation_id,
         profile_arn=profile_arn,
         thinking_config=thinking_config,
+        tool_choice=request.tool_choice,
     )
 
     return result.payload

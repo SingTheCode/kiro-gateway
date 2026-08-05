@@ -30,11 +30,80 @@ The core layer provides a unified interface that API-specific adapters use
 to convert their formats to Kiro API format.
 """
 
+import base64
 import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+import httpx
 from loguru import logger
+
+
+# ==================================================================================================
+# URL Image Fetching
+# ==================================================================================================
+
+# Simple LRU-style cache for fetched images (max 50 entries)
+_image_url_cache: Dict[str, Optional[Dict[str, str]]] = {}
+_IMAGE_CACHE_MAX_SIZE = 50
+_IMAGE_FETCH_TIMEOUT = 10.0
+
+
+def _fetch_image_from_url(url: str) -> Optional[Dict[str, str]]:
+    """
+    Fetch an image from a URL and convert it to base64.
+
+    Args:
+        url: The HTTP(S) URL to fetch the image from
+
+    Returns:
+        Dict with "media_type" and "data" keys, or None on failure
+    """
+    # Check cache first
+    if url in _image_url_cache:
+        return _image_url_cache[url]
+
+    # Evict oldest entries if cache is full
+    while len(_image_url_cache) >= _IMAGE_CACHE_MAX_SIZE:
+        oldest_key = next(iter(_image_url_cache))
+        del _image_url_cache[oldest_key]
+
+    try:
+        with httpx.Client(timeout=_IMAGE_FETCH_TIMEOUT) as client:
+            response = client.get(url, follow_redirects=True)
+            response.raise_for_status()
+
+            # Determine media type from Content-Type header
+            content_type = response.headers.get("content-type", "")
+            if ";" in content_type:
+                content_type = content_type.split(";")[0].strip()
+
+            # Validate it's an image
+            if not content_type.startswith("image/"):
+                logger.warning(f"URL does not return an image (content-type: {content_type}): {url[:80]}...")
+                _image_url_cache[url] = None
+                return None
+
+            # Convert to base64
+            image_data = base64.b64encode(response.content).decode("utf-8")
+
+            result = {
+                "media_type": content_type,
+                "data": image_data
+            }
+            _image_url_cache[url] = result
+            logger.info(f"Successfully fetched and converted URL image to base64: {url[:80]}...")
+            return result
+
+    except httpx.TimeoutException:
+        logger.warning(f"Timeout fetching image URL (>{_IMAGE_FETCH_TIMEOUT}s): {url[:80]}...")
+    except httpx.HTTPStatusError as e:
+        logger.warning(f"HTTP error fetching image URL ({e.response.status_code}): {url[:80]}...")
+    except Exception as e:
+        logger.warning(f"Failed to fetch image URL: {e}: {url[:80]}...")
+
+    _image_url_cache[url] = None
+    return None
 
 from kiro.config import (
     TOOL_DESCRIPTION_MAX_LENGTH,
@@ -169,6 +238,12 @@ def extract_text_content(content: Any) -> str:
                 # Skip image and tool_reference blocks - they're handled separately
                 if item.get("type") in ("image", "image_url", "tool_reference"):
                     continue
+                # Document blocks pass through unchanged - log for visibility
+                if item.get("type") == "document":
+                    source = item.get("source", {})
+                    media_type = source.get("media_type", "unknown") if isinstance(source, dict) else "unknown"
+                    logger.info(f"Document content block detected (media_type: {media_type}). Passing through to API.")
+                    continue
                 if item.get("type") == "text":
                     text_parts.append(item.get("text", ""))
                 elif "text" in item:
@@ -249,8 +324,10 @@ def extract_images_from_content(content: Any) -> List[Dict[str, Any]]:
                 except (ValueError, IndexError) as e:
                     logger.warning(f"Failed to parse image data URL: {e}")
             elif url.startswith("http"):
-                # URL-based images require fetching - not supported by Kiro API directly
-                logger.warning(f"URL-based images are not supported by Kiro API, skipping: {url[:80]}...")
+                # Fetch URL-based image and convert to base64
+                fetched = _fetch_image_from_url(url)
+                if fetched:
+                    images.append(fetched)
         
         # Anthropic format: {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
         elif item_type == "image":
@@ -272,9 +349,12 @@ def extract_images_from_content(content: Any) -> List[Dict[str, Any]]:
                             "data": data
                         })
                 elif source_type == "url":
-                    # URL-based images in Anthropic format
+                    # Fetch URL-based image and convert to base64
                     url = source.get("url", "")
-                    logger.warning(f"URL-based images are not supported by Kiro API, skipping: {url[:80]}...")
+                    if url:
+                        fetched = _fetch_image_from_url(url)
+                        if fetched:
+                            images.append(fetched)
             
             # Handle Pydantic model objects (ImageContentBlock.source)
             elif hasattr(source, "type"):
@@ -288,8 +368,12 @@ def extract_images_from_content(content: Any) -> List[Dict[str, Any]]:
                             "data": data
                         })
                 elif source.type == "url":
+                    # Fetch URL-based image and convert to base64
                     url = getattr(source, "url", "")
-                    logger.warning(f"URL-based images are not supported by Kiro API, skipping: {url[:80]}...")
+                    if url:
+                        fetched = _fetch_image_from_url(url)
+                        if fetched:
+                            images.append(fetched)
     
     if images:
         logger.debug(f"Extracted {len(images)} image(s) from content")
@@ -1409,7 +1493,8 @@ def build_kiro_payload(
     tools: Optional[List[UnifiedTool]],
     conversation_id: str,
     profile_arn: str,
-    thinking_config: ThinkingConfig
+    thinking_config: ThinkingConfig,
+    tool_choice: Optional[Any] = None
 ) -> KiroPayloadResult:
     """
     Builds complete payload for Kiro API from unified data.
@@ -1425,7 +1510,8 @@ def build_kiro_payload(
         conversation_id: Unique conversation ID
         profile_arn: AWS CodeWhisperer profile ARN
         thinking_config: Thinking configuration from API adapter
-    
+        tool_choice: Tool choice setting - "auto", "any", or {"type": "tool", "name": "tool_name"}
+
     Returns:
         KiroPayloadResult with payload and tool documentation
     
@@ -1583,6 +1669,17 @@ def build_kiro_payload(
     # Add profileArn
     if profile_arn:
         payload["profileArn"] = profile_arn
+
+    # Add tool_choice if provided
+    if tool_choice is not None:
+        # Convert Pydantic model to dict if needed
+        if hasattr(tool_choice, "model_dump"):
+            tool_choice_value = tool_choice.model_dump()
+        elif hasattr(tool_choice, "dict"):
+            tool_choice_value = tool_choice.dict()
+        else:
+            tool_choice_value = tool_choice
+        payload["conversationState"]["currentMessage"]["userInputMessage"]["toolChoice"] = tool_choice_value
 
     # Payload size guard — auto-trim if enabled
     if AUTO_TRIM_PAYLOAD:
