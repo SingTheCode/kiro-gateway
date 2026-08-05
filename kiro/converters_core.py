@@ -69,8 +69,9 @@ def _fetch_image_from_url(url: str) -> Optional[Dict[str, str]]:
         del _image_url_cache[oldest_key]
 
     try:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; KiroGateway/1.0)"}
         with httpx.Client(timeout=_IMAGE_FETCH_TIMEOUT) as client:
-            response = client.get(url, follow_redirects=True)
+            response = client.get(url, follow_redirects=True, headers=headers)
             response.raise_for_status()
 
             # Determine media type from Content-Type header
