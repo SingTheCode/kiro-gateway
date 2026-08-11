@@ -162,11 +162,50 @@ class ImageContentBlock(BaseModel):
     source: Union[Base64ImageSource, URLImageSource]
 
 
-# Union type for all content blocks (including images and thinking)
+# ==================================================================================================
+# Document Content Block Models
+# ==================================================================================================
+
+
+class Base64DocumentSource(BaseModel):
+    """
+    Base64-encoded document source in Anthropic format.
+
+    Attributes:
+        type: Always "base64"
+        media_type: MIME type (e.g., "application/pdf")
+        data: Base64-encoded document data
+    """
+
+    type: Literal["base64"] = "base64"
+    media_type: str
+    data: str
+
+
+class DocumentContentBlock(BaseModel):
+    """
+    Document content block in Anthropic format.
+
+    Represents a document (e.g., PDF) in a message.
+    Used for sending documents to Claude for analysis.
+
+    Attributes:
+        type: Always "document"
+        source: Document source (base64-encoded)
+    """
+
+    type: Literal["document"] = "document"
+    source: Base64DocumentSource
+
+    model_config = {"extra": "allow"}
+
+
+# Union type for all content blocks (including images, documents, and thinking)
 ContentBlock = Union[
     TextContentBlock,
     ThinkingContentBlock,
     ImageContentBlock,
+    DocumentContentBlock,
     ToolUseContentBlock,
     ToolResultContentBlock,
     ToolReferenceContentBlock,
