@@ -78,14 +78,17 @@ from kiro.config import (
     ACCOUNT_SYSTEM,
     ACCOUNTS_CONFIG_FILE,
     ACCOUNTS_STATE_FILE,
+    CODEX_AUTH_FILE,
     _warn_timeout_configuration,
 )
 from kiro.auth import KiroAuthManager
+from kiro.auth_codex import CodexAuthManager
 from kiro.cache import ModelInfoCache
 from kiro.model_resolver import ModelResolver
 from kiro.account_manager import AccountManager
 from kiro.routes_openai import router as openai_router
 from kiro.routes_anthropic import router as anthropic_router
+from kiro.routes_responses import router as responses_router
 from kiro.exceptions import validation_exception_handler
 from kiro.debug_middleware import DebugLoggerMiddleware
 
@@ -355,11 +358,19 @@ async def lifespan(app: FastAPI):
     )
     logger.info("Shared HTTP client created with connection pooling")
     
+    # ChatGPT OAuth manager for /v1/responses (optional — requires CODEX_AUTH_FILE)
+    app.state.codex_auth = None
+    if CODEX_AUTH_FILE:
+        try:
+            app.state.codex_auth = CodexAuthManager(CODEX_AUTH_FILE)
+        except Exception as e:
+            logger.error(f"Failed to load Codex auth ({CODEX_AUTH_FILE}): {e}. /v1/responses disabled.")
+
     # ==============================================================================
     # Legacy Fallback: .env → credentials.json
     # ==============================================================================
     creds_path = Path(ACCOUNTS_CONFIG_FILE)
-    
+
     # Check if we have legacy .env credentials
     has_refresh_token = bool(REFRESH_TOKEN)
     has_creds_file = bool(KIRO_CREDS_FILE) and Path(KIRO_CREDS_FILE).expanduser().exists()
@@ -570,6 +581,9 @@ app.include_router(openai_router)
 
 # Anthropic-compatible API: /v1/messages
 app.include_router(anthropic_router)
+
+# OpenAI Responses API proxy (ChatGPT OAuth): /v1/responses
+app.include_router(responses_router)
 
 
 # --- Uvicorn log config ---

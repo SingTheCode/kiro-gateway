@@ -166,6 +166,20 @@ KIRO_CLI_DB_FILE: str = str(Path(_raw_cli_db_file)) if _raw_cli_db_file else ""
 SQLITE_READONLY: bool = os.getenv("SQLITE_READONLY", "false").lower() in ("true", "1", "yes")
 
 # ==================================================================================================
+# ChatGPT OAuth (/v1/responses proxy)
+# ==================================================================================================
+
+# Path to Codex CLI auth.json (created by `codex login`).
+# Empty = /v1/responses route disabled.
+_raw_codex_auth_file = _get_raw_env_value("CODEX_AUTH_FILE") or os.getenv("CODEX_AUTH_FILE", "")
+CODEX_AUTH_FILE: str = str(Path(_raw_codex_auth_file)) if _raw_codex_auth_file else ""
+
+# Upstream Responses endpoint for ChatGPT subscription (Codex backend)
+CODEX_UPSTREAM_URL: str = os.getenv(
+    "CODEX_UPSTREAM_URL", "https://chatgpt.com/backend-api/codex/responses"
+)
+
+# ==================================================================================================
 # Kiro API URL Templates
 # ==================================================================================================
 
