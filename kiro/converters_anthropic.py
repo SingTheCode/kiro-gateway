@@ -460,6 +460,20 @@ def anthropic_to_kiro(
     # It can be a string or list of content blocks (for prompt caching)
     system_prompt = extract_system_prompt(request.system)
 
+    # Some clients (e.g. Orca hook evaluator) inject role="system" messages into the
+    # messages array instead of the top-level system field. Extract them and merge into
+    # system_prompt so they don't reach Kiro API (which only accepts user/assistant).
+    non_system_messages = []
+    for msg in unified_messages:
+        if msg.role == "system":
+            extra = msg.content if isinstance(msg.content, str) else str(msg.content)
+            if extra:
+                system_prompt = f"{system_prompt}\n\n{extra}" if system_prompt else extra
+                logger.debug(f"Merged inline system message ({len(extra)} chars) into system prompt")
+        else:
+            non_system_messages.append(msg)
+    unified_messages = non_system_messages
+
     # Get model ID for Kiro API (normalizes + resolves hidden models)
     # Pass-through principle: we normalize and send to Kiro, Kiro decides if valid
     model_id = get_model_id_for_kiro(request.model, HIDDEN_MODELS)
