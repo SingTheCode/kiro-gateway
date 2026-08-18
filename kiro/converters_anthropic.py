@@ -36,6 +36,7 @@ from kiro.models_anthropic import (
     AnthropicTool,
 )
 from kiro.converters_core import (
+    KiroPayloadResult,
     UnifiedMessage,
     UnifiedTool,
     ThinkingConfig,
@@ -428,7 +429,7 @@ def extract_thinking_config_from_anthropic(request: AnthropicMessagesRequest) ->
 
 def anthropic_to_kiro(
     request: AnthropicMessagesRequest, conversation_id: str, profile_arn: str
-) -> dict:
+) -> "KiroPayloadResult":
     """
     Converts Anthropic Messages API request to Kiro API payload.
 
@@ -500,4 +501,4 @@ def anthropic_to_kiro(
         tool_choice=request.tool_choice,
     )
 
-    return result.payload
+    return result

@@ -63,6 +63,37 @@ except ImportError:
     debug_logger = None
 
 
+def _empty_placeholder_response(request_data, stream: bool):
+    """Return empty assistant response when current message is a placeholder (no actual user input)."""
+    import uuid
+    msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+    model = request_data.model
+    if stream:
+        import json
+        chunks = [
+            f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': model, 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0}}})}\n\n",
+            f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n",
+            f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n",
+            f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': 0}})}\n\n",
+            f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n",
+        ]
+        async def gen():
+            for c in chunks:
+                yield c.encode()
+        return StreamingResponse(gen(), media_type="text/event-stream")
+    else:
+        return JSONResponse(content={
+            "id": msg_id,
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": ""}],
+            "model": model,
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0}
+        })
+
+
 # --- Security scheme ---
 # Anthropic uses x-api-key header instead of Authorization: Bearer
 anthropic_api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
@@ -380,7 +411,7 @@ async def messages(
             profile_arn_for_payload = auth_manager.profile_arn or PROFILE_ARN or ""
             
             try:
-                kiro_payload = anthropic_to_kiro(
+                kiro_payload_result = anthropic_to_kiro(
                     request_data,
                     conversation_id,
                     profile_arn_for_payload
@@ -397,7 +428,14 @@ async def messages(
                         }
                     }
                 )
-            
+
+            if kiro_payload_result.is_placeholder:
+                logger.debug("Skipping Kiro API call: current message is empty placeholder")
+                await account_manager.report_success(account.id, request_data.model)
+                return _empty_placeholder_response(request_data, request_data.stream)
+
+            kiro_payload = kiro_payload_result.payload
+
             # Log Kiro payload
             try:
                 kiro_request_body = json.dumps(kiro_payload, ensure_ascii=False, indent=2).encode('utf-8')
@@ -688,7 +726,7 @@ async def messages(
     profile_arn_for_payload = auth_manager.profile_arn or PROFILE_ARN or ""
     
     try:
-        kiro_payload = anthropic_to_kiro(
+        kiro_payload_result = anthropic_to_kiro(
             request_data,
             conversation_id,
             profile_arn_for_payload
@@ -705,7 +743,13 @@ async def messages(
                 }
             }
         )
-    
+
+    if kiro_payload_result.is_placeholder:
+        logger.debug("Skipping Kiro API call: current message is empty placeholder")
+        return _empty_placeholder_response(request_data, request_data.stream)
+
+    kiro_payload = kiro_payload_result.payload
+
     # Log Kiro payload
     try:
         kiro_request_body = json.dumps(kiro_payload, ensure_ascii=False, indent=2).encode('utf-8')

@@ -199,6 +199,7 @@ class KiroPayloadResult:
     """
     payload: Dict[str, Any]
     tool_documentation: str = ""
+    is_placeholder: bool = False
 
 
 # ==================================================================================================
@@ -1591,6 +1592,7 @@ def build_kiro_payload(
     
     # If current message is assistant, need to add it to history
     # and create user message placeholder
+    _is_placeholder = False
     if current_message.role == "assistant":
         history.append({
             "assistantResponseMessage": {
@@ -1598,6 +1600,7 @@ def build_kiro_payload(
             }
         })
         current_content = "(empty placeholder)"
+        _is_placeholder = True
     
     # If content is empty - use placeholder
     if not current_content:
@@ -1692,4 +1695,4 @@ def build_kiro_payload(
                 f"({stats.original_bytes} -> {stats.final_bytes} bytes)"
             )
 
-    return KiroPayloadResult(payload=payload, tool_documentation=tool_documentation)
+    return KiroPayloadResult(payload=payload, tool_documentation=tool_documentation, is_placeholder=_is_placeholder)
