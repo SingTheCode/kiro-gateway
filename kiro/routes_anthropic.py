@@ -495,6 +495,7 @@ async def messages(
                                     request_messages=messages_for_tokenizer,
                                     request_tools=tools_for_tokenizer,
                                     request_system=system_for_tokenizer,
+                                    tool_name_map=kiro_payload_result.tool_name_map,
                                 ):
                                     yield chunk
                             except GeneratorExit:
@@ -543,6 +544,7 @@ async def messages(
                             request_messages=messages_for_tokenizer,
                             request_tools=tools_for_tokenizer,
                             request_system=system_for_tokenizer,
+                            tool_name_map=kiro_payload_result.tool_name_map,
                         )
                         
                         await http_client.close()
@@ -859,6 +861,7 @@ async def messages(
                         request_messages=messages_for_tokenizer,
                         request_tools=tools_for_tokenizer,
                         request_system=system_for_tokenizer,
+                        tool_name_map=kiro_payload_result.tool_name_map,
                     ):
                         yield chunk
                 except GeneratorExit:
@@ -908,6 +911,7 @@ async def messages(
                 request_messages=messages_for_tokenizer,
                 request_tools=tools_for_tokenizer,
                 request_system=system_for_tokenizer,
+                tool_name_map=kiro_payload_result.tool_name_map,
             )
             
             await http_client.close()

@@ -6252,3 +6252,126 @@ class TestBuildKiroPayloadWithThinkingConfig:
         print(f"Checking for <max_thinking_length>7000</max_thinking_length> in content...")
         assert "<max_thinking_length>7000</max_thinking_length>" in content
         assert "<thinking_mode>enabled</thinking_mode>" in content
+
+# ==================================================================================================
+# Tests for truncate_tool_names
+# ==================================================================================================
+
+class TestTruncateToolNames:
+    def test_short_names_unchanged(self):
+        from kiro.converters_core import truncate_tool_names, UnifiedTool
+        tools = [UnifiedTool(name="short_name", description="test")]
+        result_tools, name_map = truncate_tool_names(tools)
+        assert result_tools[0].name == "short_name"
+        assert name_map == {}
+
+    def test_exactly_64_chars_unchanged(self):
+        from kiro.converters_core import truncate_tool_names, UnifiedTool
+        name = "a" * 64
+        tools = [UnifiedTool(name=name, description="test")]
+        result_tools, name_map = truncate_tool_names(tools)
+        assert result_tools[0].name == name
+        assert name_map == {}
+
+    def test_65_char_name_truncated_to_64(self):
+        from kiro.converters_core import truncate_tool_names, UnifiedTool
+        name = "a" * 65
+        tools = [UnifiedTool(name=name, description="test")]
+        result_tools, name_map = truncate_tool_names(tools)
+        assert len(result_tools[0].name) == 64
+        assert result_tools[0].name in name_map
+        assert name_map[result_tools[0].name] == name
+
+    def test_notion_tool_name_truncated(self):
+        from kiro.converters_core import truncate_tool_names, UnifiedTool
+        name = "mcp__plugin_Notion_notion__notion-show-advanced-analysis-next-steps"
+        assert len(name) == 67
+        tools = [UnifiedTool(name=name, description="test")]
+        result_tools, name_map = truncate_tool_names(tools)
+        truncated = result_tools[0].name
+        assert len(truncated) == 64
+        assert name_map[truncated] == name
+
+    def test_truncated_name_is_deterministic(self):
+        from kiro.converters_core import truncate_tool_names, UnifiedTool
+        name = "mcp__plugin_Notion_notion__notion-show-advanced-analysis-next-steps"
+        tools = [UnifiedTool(name=name, description="test")]
+        result1, _ = truncate_tool_names(tools)
+        result2, _ = truncate_tool_names(tools)
+        assert result1[0].name == result2[0].name
+
+    def test_none_returns_empty(self):
+        from kiro.converters_core import truncate_tool_names
+        result_tools, name_map = truncate_tool_names(None)
+        assert result_tools is None
+        assert name_map == {}
+
+
+# ==================================================================================================
+# Tests for truncate_tool_names integration in build_kiro_payload
+# ==================================================================================================
+
+class TestBuildKiroPayloadToolNameTruncation:
+    def _make_request(self, tool_name: str):
+        """Helper: minimal unified inputs for build_kiro_payload."""
+        from kiro.converters_core import UnifiedMessage, UnifiedTool
+        return (
+            [UnifiedMessage(role="user", content="hi")],
+            [UnifiedTool(name=tool_name, description="test", input_schema={"type": "object", "properties": {}})],
+        )
+
+    def _call(self, messages, tools):
+        from kiro.converters_core import build_kiro_payload, ThinkingConfig
+        return build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4-5",
+            tools=tools,
+            conversation_id="conv1",
+            profile_arn="arn:aws:test",
+            thinking_config=ThinkingConfig(enabled=False),
+        )
+
+    def test_short_name_has_empty_map(self):
+        messages, tools = self._make_request("short_tool")
+        result = self._call(messages, tools)
+        assert result.tool_name_map == {}
+
+    def test_long_name_produces_map_and_shortened_payload(self):
+        long_name = "mcp__plugin_Notion_notion__notion-show-advanced-analysis-next-steps"
+        messages, tools = self._make_request(long_name)
+        result = self._call(messages, tools)
+        assert len(result.tool_name_map) == 1
+        truncated = list(result.tool_name_map.keys())[0]
+        assert result.tool_name_map[truncated] == long_name
+        assert len(truncated) == 64
+        ctx = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
+        tool_specs = ctx.get("tools", [])
+        assert len(tool_specs) == 1
+        assert tool_specs[0]["toolSpecification"]["name"] == truncated
+
+    def test_history_tooluse_name_truncated(self):
+        from kiro.converters_core import UnifiedMessage, UnifiedTool
+        long_name = "mcp__plugin_Notion_notion__notion-show-advanced-analysis-next-steps"
+        tools = [UnifiedTool(name=long_name, description="test", input_schema={"type": "object", "properties": {}})]
+        messages = [
+            UnifiedMessage(role="user", content="use it"),
+            UnifiedMessage(
+                role="assistant",
+                content=None,
+                tool_calls=[{"id": "tc1", "function": {"name": long_name, "arguments": "{}"}}],
+            ),
+            UnifiedMessage(
+                role="user",
+                content=None,
+                tool_results=[{"tool_use_id": "tc1", "content": "done"}],
+            ),
+        ]
+        result = self._call(messages, tools)
+        truncated = list(result.tool_name_map.keys())[0]
+        history = result.payload.get("conversationState", {}).get("history", [])
+        assistant_entries = [h for h in history if "assistantResponseMessage" in h]
+        assert assistant_entries, "No assistant message in history"
+        tool_uses = assistant_entries[0]["assistantResponseMessage"].get("toolUses", [])
+        assert tool_uses, "No toolUses in assistant message"
+        assert tool_uses[0]["name"] == truncated

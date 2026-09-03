@@ -135,7 +135,8 @@ async def stream_kiro_to_anthropic(
     request_messages: Optional[list] = None,
     request_tools: Optional[list] = None,
     request_system: Optional[Any] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    tool_name_map: Optional[dict] = None
 ) -> AsyncGenerator[str, None]:
     """
     Generator for converting Kiro stream to Anthropic SSE format.
@@ -489,7 +490,7 @@ async def stream_kiro_to_anthropic(
                     "content_block": {
                         "type": "tool_use",
                         "id": tool_id,
-                        "name": tool_name,
+                        "name": tool_name_map.get(tool_name, tool_name) if tool_name_map else tool_name,
                         "input": {}
                     }
                 })
@@ -564,11 +565,11 @@ async def stream_kiro_to_anthropic(
                     "content_block": {
                         "type": "tool_use",
                         "id": tool_id,
-                        "name": tool_name,
+                        "name": tool_name_map.get(tool_name, tool_name) if tool_name_map else tool_name,
                         "input": {}
                     }
                 })
-                
+
                 input_json = json.dumps(tool_input, ensure_ascii=False)
                 yield format_sse_event("content_block_delta", {
                     "type": "content_block_delta",
@@ -725,7 +726,8 @@ async def collect_anthropic_response(
     auth_manager: "KiroAuthManager",
     request_messages: Optional[list] = None,
     request_tools: Optional[list] = None,
-    request_system: Optional[Any] = None
+    request_system: Optional[Any] = None,
+    tool_name_map: Optional[dict] = None
 ) -> dict:
     """
     Collect full response from Kiro stream in Anthropic format.
@@ -799,7 +801,7 @@ async def collect_anthropic_response(
         content_blocks.append({
             "type": "tool_use",
             "id": tool_id,
-            "name": tool_name,
+            "name": tool_name_map.get(tool_name, tool_name) if tool_name_map else tool_name,
             "input": tool_input
         })
     
@@ -873,7 +875,8 @@ async def stream_with_first_token_retry_anthropic(
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
     request_tools: Optional[list] = None,
-    request_system: Optional[Any] = None
+    request_system: Optional[Any] = None,
+    tool_name_map: Optional[dict] = None
 ) -> AsyncGenerator[str, None]:
     """
     Streaming with automatic retry on first token timeout for Anthropic API.
@@ -934,6 +937,7 @@ async def stream_with_first_token_retry_anthropic(
             request_messages=request_messages,
             request_tools=request_tools,
             request_system=request_system,
+            tool_name_map=tool_name_map,
         ):
             yield chunk
     

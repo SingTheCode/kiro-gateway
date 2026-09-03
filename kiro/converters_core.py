@@ -31,6 +31,7 @@ to convert their formats to Kiro API format.
 """
 
 import base64
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -200,6 +201,7 @@ class KiroPayloadResult:
     payload: Dict[str, Any]
     tool_documentation: str = ""
     is_placeholder: bool = False
+    tool_name_map: Dict[str, str] = field(default_factory=dict)
 
 
 # ==================================================================================================
@@ -641,6 +643,33 @@ def process_tools_with_long_descriptions(
         )
     
     return processed_tools if processed_tools else None, tool_documentation
+
+
+def truncate_tool_names(
+    tools: Optional[List[UnifiedTool]],
+) -> Tuple[Optional[List[UnifiedTool]], Dict[str, str]]:
+    """Truncates tool names exceeding 64 chars to 64 chars using a hash suffix.
+
+    Returns processed tools and a mapping of {truncated_name: original_name}.
+    """
+    if not tools:
+        return tools, {}
+
+    name_map: Dict[str, str] = {}
+    result = []
+    for tool in tools:
+        if len(tool.name) <= 64:
+            result.append(tool)
+        else:
+            suffix = hashlib.sha1(tool.name.encode()).hexdigest()[:3]
+            truncated = tool.name[:60] + "_" + suffix
+            name_map[truncated] = tool.name
+            result.append(UnifiedTool(
+                name=truncated,
+                description=tool.description,
+                input_schema=tool.input_schema,
+            ))
+    return result, name_map
 
 
 def convert_tools_to_kiro_format(tools: Optional[List[UnifiedTool]]) -> List[Dict[str, Any]]:
@@ -1480,6 +1509,9 @@ def build_kiro_payload(
     """
     # Process tools with long descriptions
     processed_tools, tool_documentation = process_tools_with_long_descriptions(tools)
+
+    # Truncate tool names exceeding Kiro API 64-char limit
+    processed_tools, tool_name_map = truncate_tool_names(processed_tools)
     
     # Add tool documentation to system prompt if present
     full_system_prompt = system_prompt
@@ -1536,6 +1568,14 @@ def build_kiro_payload(
             first_msg.content = f"{full_system_prompt}\n\n{original_content}"
     
     history = build_kiro_history(history_messages, model_id)
+
+    # Patch toolUse names in history to use truncated names
+    if tool_name_map:
+        reverse_map = {v: k for k, v in tool_name_map.items()}
+        for entry in history:
+            for tool_use in entry.get("assistantResponseMessage", {}).get("toolUses", []):
+                if tool_use.get("name") in reverse_map:
+                    tool_use["name"] = reverse_map[tool_use["name"]]
     
     # Current message (the last one)
     current_message = merged_messages[-1]
@@ -1650,4 +1690,4 @@ def build_kiro_payload(
                 f"({stats.original_bytes} -> {stats.final_bytes} bytes)"
             )
 
-    return KiroPayloadResult(payload=payload, tool_documentation=tool_documentation, is_placeholder=_is_placeholder)
+    return KiroPayloadResult(payload=payload, tool_documentation=tool_documentation, is_placeholder=_is_placeholder, tool_name_map=tool_name_map)
