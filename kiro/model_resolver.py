@@ -164,6 +164,16 @@ def normalize_model_name(name: str) -> str:
         minor = match.group(3)   # 7
         family = match.group(4)  # sonnet
         return f"{prefix}-{major}.{minor}-{family}"  # claude-3.7-sonnet
+    # Pattern 3b: Legacy format without minor - claude-{major}-{family}(-{suffix})?
+    # Matches: claude-3-opus, claude-3-opus-20240229, claude-3-sonnet-20240229
+    legacy_no_minor_pattern = r'^(claude)-(\d+)-(haiku|sonnet|opus)(?:-(?:\d{8}|latest|\d+))?$'
+    match = re.match(legacy_no_minor_pattern, name_lower)
+    if match:
+        prefix = match.group(1)  # claude
+        major = match.group(2)   # 3
+        family = match.group(3)  # opus
+        return f"{prefix}-{major}-{family}"  # claude-3-opus
+
     
     # Pattern 4: Already normalized with dot but has date suffix
     # Matches: claude-haiku-4.5-20251001, claude-3.7-sonnet-20250219
@@ -189,12 +199,16 @@ def normalize_model_name(name: str) -> str:
     return name
 
 
-def get_model_id_for_kiro(model_name: str, hidden_models: Dict[str, str]) -> str:
+def get_model_id_for_kiro(
+    model_name: str,
+    hidden_models: Dict[str, str],
+    aliases: Optional[Dict[str, str]] = None,
+) -> str:
     """
     Get the model ID to send to Kiro API.
     
     This is a simple helper for converters that don't have access to the full
-    ModelResolver. It normalizes the name and checks hidden models.
+    ModelResolver. It resolves aliases, normalizes the name, and checks hidden models.
     
     For hidden models (like claude-3.7-sonnet), returns the internal Kiro ID.
     For regular models, returns the normalized name.
@@ -202,6 +216,7 @@ def get_model_id_for_kiro(model_name: str, hidden_models: Dict[str, str]) -> str
     Args:
         model_name: External model name from client
         hidden_models: Dict mapping display names to internal Kiro IDs
+        aliases: Optional dict mapping aliases to real model IDs (defaults to MODEL_ALIASES)
     
     Returns:
         Model ID to send to Kiro API
@@ -211,10 +226,26 @@ def get_model_id_for_kiro(model_name: str, hidden_models: Dict[str, str]) -> str
         'claude-haiku-4.5'
         >>> get_model_id_for_kiro("claude-3.7-sonnet", {"claude-3.7-sonnet": "CLAUDE_3_7_SONNET_20250219_V1_0"})
         'CLAUDE_3_7_SONNET_20250219_V1_0'
-        >>> get_model_id_for_kiro("claude-3-7-sonnet", {"claude-3.7-sonnet": "CLAUDE_3_7_SONNET_20250219_V1_0"})
+        >>> get_model_id_for_kiro("claude-3.7-sonnet", {"claude-3.7-sonnet": "CLAUDE_3_7_SONNET_20250219_V1_0"})
         'CLAUDE_3_7_SONNET_20250219_V1_0'
     """
-    normalized = normalize_model_name(model_name)
+    if aliases is None:
+        from kiro.config import MODEL_ALIASES
+        aliases = MODEL_ALIASES
+
+    # Check hidden models first if model or normalized is in hidden_models
+    normalized_raw = normalize_model_name(model_name)
+    if normalized_raw in hidden_models:
+        return to_runtime_model_id(hidden_models[normalized_raw])
+
+    # Resolve alias on raw external name first
+    resolved = aliases.get(model_name, model_name)
+    normalized = normalize_model_name(resolved)
+
+    # If raw name didn't match, check alias on normalized name
+    if resolved == model_name and normalized in aliases:
+        normalized = normalize_model_name(aliases[normalized])
+
     internal = hidden_models.get(normalized, normalized)
     return to_runtime_model_id(internal)
 
@@ -325,6 +356,14 @@ class ModelResolver:
         logger.debug(
             f"Model resolution: '{external_model}' → normalized: '{normalized}'"
         )
+        # Layer 1.5: Resolve alias on normalized name (if raw didn't match an alias)
+        if resolved_model == external_model and normalized in self.aliases:
+            alias_target = self.aliases[normalized]
+            logger.debug(
+                f"Alias resolved on normalized name: '{normalized}' → '{alias_target}'"
+            )
+            normalized = normalize_model_name(alias_target)
+
         
         # Layer 2: Check dynamic cache (from /ListAvailableModels)
         if self.cache.is_valid_model(normalized):

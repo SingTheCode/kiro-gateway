@@ -8,6 +8,7 @@ All tests MUST be completely isolated from the network.
 """
 
 import asyncio
+import os
 import json
 import pytest
 import time
@@ -57,6 +58,9 @@ def setup_test_environment(tmp_path_factory):
     """
     print("🔧 Setting up isolated test environment...")
     
+    # Isolate from ambient KIRO_API_REGION in .env during tests
+    original_kiro_api_region = os.environ.pop("KIRO_API_REGION", None)
+
     # Create temporary directory for test files
     tmp_dir = tmp_path_factory.mktemp("test_config")
     
@@ -100,6 +104,8 @@ def setup_test_environment(tmp_path_factory):
     kiro.config.ACCOUNTS_STATE_FILE = original_state_file
     
     print("🧹 Test environment cleaned up")
+    if original_kiro_api_region is not None:
+        os.environ["KIRO_API_REGION"] = original_kiro_api_region
 
 
 @pytest.fixture

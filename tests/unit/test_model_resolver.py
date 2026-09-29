@@ -1738,3 +1738,42 @@ class TestAliasSystemSecurity:
         print(f"Received suggestions: {suggestions}")
         # This is expected behavior - alias name doesn't contain family
         assert len(suggestions) > 0
+
+
+class TestDefaultModelAliasesIntegration:
+    """Tests ensuring default model aliases map unsupported/legacy models to working equivalents."""
+
+    def test_default_aliases_map_opus_46_to_45(self, mock_model_cache):
+        """claude-opus-4.6 resolves to claude-opus-4.5."""
+        from kiro.config import MODEL_ALIASES
+        resolver = ModelResolver(cache=mock_model_cache, aliases=MODEL_ALIASES)
+        res = resolver.resolve("claude-opus-4.6")
+        assert res.internal_id == "claude-opus-4.5"
+
+    def test_default_aliases_map_legacy_claude_35_sonnet_with_date(self, mock_model_cache):
+        """claude-3-5-sonnet-20241022 resolves to claude-sonnet-4.5 via normalized alias."""
+        from kiro.config import MODEL_ALIASES
+        resolver = ModelResolver(cache=mock_model_cache, aliases=MODEL_ALIASES)
+        res = resolver.resolve("claude-3-5-sonnet-20241022")
+        assert res.internal_id == "claude-sonnet-4.5"
+
+    def test_default_aliases_map_legacy_claude_37_sonnet_with_date(self, mock_model_cache):
+        """claude-3-7-sonnet-20250219 resolves to claude-sonnet-4.5 via normalized alias."""
+        from kiro.config import MODEL_ALIASES
+        resolver = ModelResolver(cache=mock_model_cache, aliases=MODEL_ALIASES)
+        res = resolver.resolve("claude-3-7-sonnet-20250219")
+        assert res.internal_id == "claude-sonnet-4.5"
+
+    def test_default_aliases_map_legacy_claude_3_opus_with_date(self, mock_model_cache):
+        """claude-3-opus-20240229 resolves to claude-opus-4.5 via normalized alias."""
+        from kiro.config import MODEL_ALIASES
+        resolver = ModelResolver(cache=mock_model_cache, aliases=MODEL_ALIASES)
+        res = resolver.resolve("claude-3-opus-20240229")
+        assert res.internal_id == "claude-opus-4.5"
+
+    def test_get_model_id_for_kiro_with_default_aliases(self):
+        """get_model_id_for_kiro resolves aliases when model is not in hidden_models."""
+        assert get_model_id_for_kiro("claude-opus-4.6", {}) == "claude-opus-4.5"
+        assert get_model_id_for_kiro("claude-3-5-sonnet-20241022", {}) == "claude-sonnet-4.5"
+        assert get_model_id_for_kiro("claude-3-7-sonnet-20250219", {}) == "claude-sonnet-4.5"
+        assert get_model_id_for_kiro("claude-3-opus-20240229", {}) == "claude-opus-4.5"

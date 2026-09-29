@@ -203,6 +203,11 @@ class KiroPayloadResult:
     is_placeholder: bool = False
     tool_name_map: Dict[str, str] = field(default_factory=dict)
 
+    def __getitem__(self, key: str) -> Any:
+        return self.payload[key]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.payload
 
 # ==================================================================================================
 # Text Content Extraction

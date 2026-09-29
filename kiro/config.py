@@ -262,6 +262,20 @@ HIDDEN_MODELS: Dict[str, str] = {
 # Default: {"auto-kiro": "auto"} to avoid Cursor IDE conflict
 MODEL_ALIASES: Dict[str, str] = {
     "auto-kiro": "auto",  # Default alias to avoid Cursor's "auto" model conflict
+    # Upstream Kiro API (runtime.kiro.dev) rejects opus-4.6+ and legacy Claude 3.x IDs.
+    # Map them to working equivalents supported by the upstream API:
+    "claude-opus-4.6": "claude-opus-4.5",
+    "claude-opus-4.7": "claude-opus-4.5",
+    "claude-opus-4.8": "claude-opus-4.5",
+    "claude-3.5-sonnet": "claude-sonnet-4.5",
+    "claude-3-5-sonnet": "claude-sonnet-4.5",
+    "claude-3.7-sonnet": "claude-sonnet-4.5",
+    "claude-3-7-sonnet": "claude-sonnet-4.5",
+    "claude-3.5-haiku": "claude-haiku-4.5",
+    "claude-3-5-haiku": "claude-haiku-4.5",
+    "claude-3-opus": "claude-opus-4.5",
+    "claude-3.0-opus": "claude-opus-4.5",
+    "claude-3-sonnet": "claude-sonnet-4.5",
 }
 
 # Models to hide from /v1/models endpoint.
